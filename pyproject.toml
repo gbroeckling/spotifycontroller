@@ -12,6 +12,13 @@ dependencies = [
     "spotipy>=2.24.0",
     "python-rtmidi>=1.5.8",
     "mido>=1.3.2",
+    "numpy>=1.26.0",
+]
+
+[project.optional-dependencies]
+audio = [
+    "sounddevice>=0.4.6",
+    "soundfile>=0.12.1",
 ]
 
 [project.scripts]

@@ -26,7 +26,9 @@ from spotifycontroller.const import (
     MAP_LOAD,
     MAP_LOOP_IN,
     MAP_LOOP_OUT,
+    MAP_NEXT,
     MAP_PLAY,
+    MAP_PREV,
     MAP_SYNC,
     MAP_VOLUME,
 )
@@ -72,6 +74,8 @@ class Mixer:
             self._controller.on(prefix + MAP_CUE, self._on_cue)
             self._controller.on(prefix + MAP_SYNC, self._on_sync)
             self._controller.on(prefix + MAP_LOAD, self._on_load)
+            self._controller.on(prefix + MAP_NEXT, self._on_next)
+            self._controller.on(prefix + MAP_PREV, self._on_prev)
             self._controller.on(prefix + MAP_JOG, self._on_jog)
             self._controller.on(prefix + MAP_VOLUME, self._on_volume)
             self._controller.on(prefix + MAP_EQ_HI, self._on_eq)
@@ -87,22 +91,34 @@ class Mixer:
         self._controller.on(MAP_CROSSFADER, self._on_crossfader)
         _LOGGER.info("Mixer bound to controller: %s", self._controller.mapping.name)
 
+    # -- Helpers --
+
+    def _auto_load_current(self, deck: Deck) -> None:
+        """If the deck has no track loaded, grab whatever Spotify is playing."""
+        if deck.is_loaded:
+            return
+        current = self._playback.get_current_track()
+        if current:
+            deck.load_track(current)
+
     # -- Callbacks --
 
     def _on_play(self, control: MidiControl, value: int) -> None:
         if control.deck is None:
             return
         deck = self.get_deck(control.deck)
-        if not deck.is_loaded:
-            _LOGGER.warning("Deck %s: no track loaded", deck.name)
-            return
+
+        # Auto-load current track if deck is empty — don't block play
+        self._auto_load_current(deck)
 
         if deck.is_playing:
             self._playback.pause()
             deck.is_playing = False
             _LOGGER.info("Deck %s: paused", deck.name)
         else:
-            self._playback.play(uri=deck.track.uri if deck.track else None)
+            # If a track is loaded, play it; otherwise just resume
+            uri = deck.track.uri if deck.track else None
+            self._playback.play(uri=uri)
             deck.is_playing = True
             self._active_deck = control.deck
             _LOGGER.info("Deck %s: playing", deck.name)
@@ -111,13 +127,13 @@ class Mixer:
         if control.deck is None:
             return
         deck = self.get_deck(control.deck)
-        if deck.is_loaded:
-            self._playback.seek(0)
-            _LOGGER.info("Deck %s: cue — returned to start", deck.name)
+        self._auto_load_current(deck)
+        self._playback.seek(0)
+        _LOGGER.info("Deck %s: cue — returned to start", deck.name)
 
     def _on_sync(self, control: MidiControl, value: int) -> None:
-        # Spotify doesn't expose BPM sync — this is a placeholder for future
-        # beat-matching features (e.g., tempo analysis via audio features API).
+        # Spotify doesn't expose BPM sync — placeholder for future
+        # beat-matching via audio features API or local audio engine.
         if control.deck:
             _LOGGER.info("Deck %s: sync pressed (not yet implemented)", control.deck)
 
@@ -125,12 +141,33 @@ class Mixer:
         if control.deck is None:
             return
         deck = self.get_deck(control.deck)
-        # Load whatever is currently playing in Spotify onto this deck
         current = self._playback.get_current_track()
         if current:
             deck.load_track(current)
         else:
             _LOGGER.warning("Deck %s: nothing playing in Spotify to load", deck.name)
+
+    def _on_next(self, control: MidiControl, value: int) -> None:
+        """Skip to the next track in Spotify's queue."""
+        if control.deck is None:
+            return
+        self._playback.next_track()
+        deck = self.get_deck(control.deck)
+        deck.is_playing = True
+        self._active_deck = control.deck
+        _LOGGER.info("Deck %s: next track", deck.name)
+        # Re-load deck with the new track after a brief moment
+        # (Spotify needs time to switch tracks before we can query it)
+
+    def _on_prev(self, control: MidiControl, value: int) -> None:
+        """Go to the previous track in Spotify's history."""
+        if control.deck is None:
+            return
+        self._playback.previous_track()
+        deck = self.get_deck(control.deck)
+        deck.is_playing = True
+        self._active_deck = control.deck
+        _LOGGER.info("Deck %s: previous track", deck.name)
 
     def _on_jog(self, control: MidiControl, value: int) -> None:
         if control.deck is None:
@@ -145,7 +182,6 @@ class Mixer:
             return
         deck = self.get_deck(control.deck)
         deck.volume = value
-        # Apply volume based on crossfader position
         self._apply_volumes()
 
     def _on_eq(self, control: MidiControl, value: int) -> None:
@@ -158,14 +194,14 @@ class Mixer:
             deck.eq_mid = value
         elif control.name.endswith(MAP_EQ_LO):
             deck.eq_lo = value
-        # Spotify doesn't have per-band EQ — stored for future audio processing
+        # EQ values tracked for the local audio engine (Spotify has no EQ API)
         _LOGGER.debug("Deck %s: EQ hi=%d mid=%d lo=%d", deck.name, deck.eq_hi, deck.eq_mid, deck.eq_lo)
 
     def _on_hotcue(self, control: MidiControl, value: int) -> None:
         if control.deck is None:
             return
         deck = self.get_deck(control.deck)
-        # Determine which pad number from control name
+        self._auto_load_current(deck)
         for i, hc in enumerate((MAP_HOTCUE_1, MAP_HOTCUE_2, MAP_HOTCUE_3, MAP_HOTCUE_4), 1):
             if control.name.endswith(hc):
                 if i in deck.cue_points:
@@ -178,7 +214,7 @@ class Mixer:
                 break
 
     def _on_loop(self, control: MidiControl, value: int) -> None:
-        # Spotify doesn't support native loop points — placeholder
+        # Placeholder — will work with local audio engine
         if control.deck:
             _LOGGER.info("Deck %s: loop %s (not yet implemented)", control.deck, control.name.split("_")[-1])
 
@@ -192,12 +228,10 @@ class Mixer:
         Since Spotify has a single volume control, we blend based on
         which deck is active and the crossfader position.
         """
-        # Crossfader: 0 = full deck A, 127 = full deck B, 64 = center
         cf = self.crossfader / 127.0
         vol_a = self.deck_a.volume_percent() * (1.0 - cf)
         vol_b = self.deck_b.volume_percent() * cf
 
-        # Active deck determines which volume is sent to Spotify
         if self._active_deck == DECK_A:
             effective = int(vol_a)
         else:

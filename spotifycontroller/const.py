@@ -49,3 +49,15 @@ MAP_HOTCUE_3 = "hotcue_3"
 MAP_HOTCUE_4 = "hotcue_4"
 MAP_LOOP_IN = "loop_in"
 MAP_LOOP_OUT = "loop_out"
+MAP_NEXT = "next"
+MAP_PREV = "prev"
+MAP_PFL = "pfl"
+MAP_TRIM = "trim"
+
+# Audio engine
+AUDIO_SAMPLE_RATE = 44100
+AUDIO_CHANNELS = 2
+AUDIO_BUFFER_SIZE = 1024
+
+# Supported local audio formats
+AUDIO_EXTENSIONS = {".mp3", ".flac", ".wav", ".ogg", ".m4a", ".aac"}

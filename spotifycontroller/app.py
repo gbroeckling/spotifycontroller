@@ -1,7 +1,7 @@
 """Main application entry point for SpotifyController.
 
-Wires together the MIDI listener, Spotify client, virtual decks, and
-mixer, then drops into the console UI.
+Wires together the MIDI listener, Spotify client, virtual decks, audio
+engine, and mixer, then drops into the console UI.
 """
 
 from __future__ import annotations
@@ -11,11 +11,11 @@ import logging
 import os
 import sys
 
+from spotifycontroller.engine.mixer import Mixer
 from spotifycontroller.midi.listener import MidiListener, list_midi_ports
 from spotifycontroller.midi.vestax_vci380 import VestaxVCI380
 from spotifycontroller.spotify.auth import create_spotify_client
 from spotifycontroller.spotify.playback import SpotifyPlayback
-from spotifycontroller.engine.mixer import Mixer
 from spotifycontroller.ui.console import run_console
 
 _LOGGER = logging.getLogger(__name__)
@@ -37,6 +37,11 @@ def _parse_args() -> argparse.Namespace:
         help="List available MIDI ports and exit",
     )
     parser.add_argument(
+        "--midi-monitor",
+        action="store_true",
+        help="Print raw MIDI messages from your controller (for mapping verification)",
+    )
+    parser.add_argument(
         "--client-id",
         default=None,
         help="Spotify app client ID (or set SPOTIPY_CLIENT_ID env var)",
@@ -45,6 +50,11 @@ def _parse_args() -> argparse.Namespace:
         "--client-secret",
         default=None,
         help="Spotify app client secret (or set SPOTIPY_CLIENT_SECRET env var)",
+    )
+    parser.add_argument(
+        "--no-audio-engine",
+        action="store_true",
+        help="Disable the local audio engine (Spotify-API-only mode)",
     )
     parser.add_argument(
         "-v", "--verbose",
@@ -74,6 +84,13 @@ def main() -> None:
             print("No MIDI input ports found.")
         sys.exit(0)
 
+    # -- MIDI monitor mode --
+    if args.midi_monitor:
+        from spotifycontroller.midi.monitor import run_monitor
+
+        run_monitor(port_name=args.midi_port)
+        sys.exit(0)
+
     # -- Spotify credentials --
     client_id = args.client_id or os.environ.get("SPOTIPY_CLIENT_ID")
     client_secret = args.client_secret or os.environ.get("SPOTIPY_CLIENT_SECRET")
@@ -89,6 +106,22 @@ def main() -> None:
     print("Authenticating with Spotify...")
     sp_client = create_spotify_client(client_id, client_secret)
     playback = SpotifyPlayback(sp_client)
+
+    # -- Audio engine (optional) --
+    audio_engine = None
+    if not args.no_audio_engine:
+        try:
+            from spotifycontroller.engine.audio import AUDIO_ENGINE_AVAILABLE, AudioEngine
+
+            if AUDIO_ENGINE_AVAILABLE:
+                audio_engine = AudioEngine()
+                audio_engine.start()
+                print("Local audio engine: ACTIVE (load local files with 'loadfile')")
+            else:
+                print("Local audio engine: DISABLED (install sounddevice + soundfile to enable)")
+        except Exception:
+            _LOGGER.debug("Audio engine init failed", exc_info=True)
+            print("Local audio engine: DISABLED (optional)")
 
     # -- Controller setup --
     controller = VestaxVCI380()
@@ -109,7 +142,7 @@ def main() -> None:
         print("You can still use console commands to control Spotify.")
 
     # -- Console UI --
-    run_console(mixer, playback, listener)
+    run_console(mixer, playback, listener, audio_engine=audio_engine)
 
 
 if __name__ == "__main__":
