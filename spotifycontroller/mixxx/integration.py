@@ -22,8 +22,13 @@ _MIXXX_USER_DIR = Path(os.environ.get("LOCALAPPDATA", "")) / "Mixxx"
 _MIXXX_CONTROLLERS_DIR = _MIXXX_USER_DIR / "controllers"
 _MIXXX_DB_PATH = _MIXXX_USER_DIR / "mixxxdb.sqlite"
 
-# Where our bundled mappings live (relative to repo root)
-_BUNDLED_MAPPINGS = Path(__file__).resolve().parent.parent.parent / "mappings" / "mixxx"
+# Where our bundled files live (relative to repo root)
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+_BUNDLED_MAPPINGS = _REPO_ROOT / "mappings" / "mixxx"
+_BUNDLED_SKINS = _REPO_ROOT / "skins"
+
+# Mixxx user skins directory
+_MIXXX_SKINS_DIR = _MIXXX_USER_DIR / "skins"
 
 # Common Mixxx install locations
 _MIXXX_INSTALL_PATHS = [
@@ -121,6 +126,61 @@ def install_controller_mapping() -> bool:
     return False
 
 
+def get_skins_dir() -> Path:
+    """Return the Mixxx user skins directory, creating it if needed."""
+    _MIXXX_SKINS_DIR.mkdir(parents=True, exist_ok=True)
+    return _MIXXX_SKINS_DIR
+
+
+def list_bundled_skins() -> list[str]:
+    """Return names of skins bundled with SpotifyController."""
+    if not _BUNDLED_SKINS.exists():
+        return []
+    return [d.name for d in _BUNDLED_SKINS.iterdir() if d.is_dir() and (d / "skin.xml").exists()]
+
+
+def install_skin(skin_name: str | None = None) -> bool:
+    """Copy a bundled skin into Mixxx's user skins directory.
+
+    If skin_name is None, installs all bundled skins.
+    Returns True if at least one skin was installed.
+    """
+    dest_dir = get_skins_dir()
+    available = list_bundled_skins()
+
+    if not available:
+        _LOGGER.error("No bundled skins found in %s", _BUNDLED_SKINS)
+        return False
+
+    to_install = [skin_name] if skin_name else available
+    installed = []
+
+    for name in to_install:
+        src = _BUNDLED_SKINS / name
+        if not src.exists() or not (src / "skin.xml").exists():
+            _LOGGER.warning("Skin not found or invalid: %s", name)
+            continue
+
+        dest = dest_dir / name
+        if dest.exists():
+            shutil.rmtree(dest)
+
+        shutil.copytree(src, dest)
+        installed.append(name)
+        _LOGGER.info("Installed skin: %s → %s", name, dest)
+
+    if installed:
+        _LOGGER.info("Installed %d skin(s) to %s", len(installed), dest_dir)
+        return True
+
+    return False
+
+
+def is_skin_installed(skin_name: str) -> bool:
+    """Check if a skin is installed in Mixxx's user skins directory."""
+    return (get_skins_dir() / skin_name / "skin.xml").exists()
+
+
 def launch_mixxx(exe: Path | None = None) -> subprocess.Popen | None:
     """Launch Mixxx as a subprocess."""
     exe = exe or find_mixxx_executable()
@@ -167,6 +227,15 @@ def print_setup_status() -> None:
     if mapping_xml.exists():
         print("  VCI-380 map:    INSTALLED")
     else:
-        print("  VCI-380 map:    not installed (run 'install-mapping' command)")
+        print("  VCI-380 map:    not installed (run 'install-mapping')")
+
+    # Check skins
+    skins_dir = get_skins_dir()
+    bundled = list_bundled_skins()
+    print(f"  Skins dir:      {skins_dir}")
+    print(f"  Bundled skins:  {', '.join(bundled) if bundled else 'none'}")
+    for name in bundled:
+        status = "INSTALLED" if is_skin_installed(name) else "not installed"
+        print(f"    {name}: {status}")
 
     print("==========================\n")

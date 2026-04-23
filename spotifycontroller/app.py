@@ -57,6 +57,16 @@ def _parse_args() -> argparse.Namespace:
         help="Install VCI-380 controller mapping into Mixxx and exit",
     )
     parser.add_argument(
+        "--install-skin",
+        action="store_true",
+        help="Install Traktmixxx-RAW skin into Mixxx and exit",
+    )
+    parser.add_argument(
+        "--install-all",
+        action="store_true",
+        help="Install both controller mapping and skin into Mixxx and exit",
+    )
+    parser.add_argument(
         "--launch-mixxx",
         action="store_true",
         help="Launch Mixxx after setup",
@@ -115,12 +125,24 @@ def main() -> None:
         sys.exit(0)
 
     # -- Install mapping --
-    if args.install_mapping:
+    if args.install_mapping or args.install_all:
         if install_controller_mapping():
             print("VCI-380 mapping installed into Mixxx.")
-            print("Restart Mixxx, then go to Preferences → Controllers → Vestax VCI-380")
+            print("Restart Mixxx → Preferences → Controllers → Vestax VCI-380")
         else:
-            print("Failed to install mapping. Is Mixxx installed?")
+            print("Failed to install mapping.")
+        if not args.install_all:
+            sys.exit(0)
+
+    # -- Install skin --
+    if args.install_skin or args.install_all:
+        from spotifycontroller.mixxx.integration import install_skin
+
+        if install_skin():
+            print("Traktmixxx-RAW skin installed into Mixxx.")
+            print("Restart Mixxx → Preferences → Interface → select Traktmixxx-RAW")
+        else:
+            print("Failed to install skin.")
         sys.exit(0)
 
     # -- Spotify credentials --

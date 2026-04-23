@@ -158,6 +158,20 @@ def run_console(
                 print("VCI-380 mapping installed. Restart Mixxx to activate.")
             else:
                 print("Failed to install mapping.")
+        elif cmd == "install-skin":
+            from spotifycontroller.mixxx.integration import install_skin
+
+            if install_skin():
+                print("Traktmixxx-RAW skin installed. Restart Mixxx → Preferences → Interface.")
+            else:
+                print("Failed to install skin.")
+        elif cmd == "install-all":
+            from spotifycontroller.mixxx.integration import install_controller_mapping as icm
+            from spotifycontroller.mixxx.integration import install_skin
+
+            icm()
+            install_skin()
+            print("Mapping + skin installed. Restart Mixxx to activate.")
         elif cmd == "mixxx-status":
             from spotifycontroller.mixxx.integration import print_setup_status
 
@@ -343,6 +357,8 @@ def _print_help() -> None:
   --- Mixxx ---
   mixxx-status                  show Mixxx installation status
   install-mapping               install VCI-380 mapping into Mixxx
+  install-skin                  install Traktmixxx-RAW skin into Mixxx
+  install-all                   install mapping + skin
   launch-mixxx                  start Mixxx
   import <folder> [crate]       import audio files into Mixxx library
   mixxx-search <query>          search Mixxx library
