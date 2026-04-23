@@ -7,7 +7,7 @@ name = "spotifycontroller"
 version = "0.0.1"
 description = "DJ controller bridge for Spotify — maps MIDI hardware to Spotify playback"
 requires-python = ">=3.12"
-license = {text = "Apache-2.0"}
+license = "Apache-2.0"
 dependencies = [
     "spotipy>=2.24.0",
     "python-rtmidi>=1.5.8",
@@ -23,6 +23,9 @@ audio = [
 
 [project.scripts]
 spotifycontroller = "spotifycontroller.app:main"
+
+[tool.setuptools.packages.find]
+include = ["spotifycontroller*"]
 
 [tool.ruff]
 target-version = "py312"

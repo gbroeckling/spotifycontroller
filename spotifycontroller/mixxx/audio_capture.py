@@ -67,8 +67,9 @@ def find_loopback_device() -> int | None:
     for i, dev in enumerate(devices):
         hostapi = sd.query_hostapis(dev["hostapi"])["name"]
         name = dev["name"].lower()
-        # Look for WASAPI loopback devices
-        if "loopback" in name and dev["max_input_channels"] > 0:
+        # Look for WASAPI loopback devices or Stereo Mix (Realtek exposes this)
+        loopback_keywords = ["loopback", "stereo mix", "what u hear", "wave out"]
+        if dev["max_input_channels"] > 0 and any(kw in name for kw in loopback_keywords):
             _LOGGER.info("Found loopback device: [%d] %s (%s)", i, dev["name"], hostapi)
             return i
         # On some systems, WASAPI output devices can be opened as loopback

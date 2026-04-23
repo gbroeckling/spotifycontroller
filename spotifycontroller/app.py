@@ -128,7 +128,7 @@ def main() -> None:
     if args.install_mapping or args.install_all:
         if install_controller_mapping():
             print("VCI-380 mapping installed into Mixxx.")
-            print("Restart Mixxx → Preferences → Controllers → Vestax VCI-380")
+            print("Restart Mixxx > Preferences > Controllers > Vestax VCI-380")
         else:
             print("Failed to install mapping.")
         if not args.install_all:
@@ -140,7 +140,7 @@ def main() -> None:
 
         if install_skin():
             print("Traktmixxx-RAW skin installed into Mixxx.")
-            print("Restart Mixxx → Preferences → Interface → select Traktmixxx-RAW")
+            print("Restart Mixxx > Preferences > Interface > select Traktmixxx-RAW")
         else:
             print("Failed to install skin.")
         sys.exit(0)
