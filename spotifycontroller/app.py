@@ -1,7 +1,7 @@
 """Main application entry point for SpotifyController.
 
-Wires together the MIDI listener, Spotify client, virtual decks, audio
-engine, and mixer, then drops into the console UI.
+Wires together Mixxx, MIDI listener, Spotify client, audio capture,
+and the console UI.
 """
 
 from __future__ import annotations
@@ -14,6 +14,11 @@ import sys
 from spotifycontroller.engine.mixer import Mixer
 from spotifycontroller.midi.listener import MidiListener, list_midi_ports
 from spotifycontroller.midi.vestax_vci380 import VestaxVCI380
+from spotifycontroller.mixxx.integration import (
+    find_mixxx_executable,
+    install_controller_mapping,
+    print_setup_status,
+)
 from spotifycontroller.spotify.auth import create_spotify_client
 from spotifycontroller.spotify.playback import SpotifyPlayback
 from spotifycontroller.ui.console import run_console
@@ -24,7 +29,7 @@ _LOGGER = logging.getLogger(__name__)
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="spotifycontroller",
-        description="DJ controller bridge for Spotify",
+        description="DJ controller bridge — Spotify + Mixxx + VCI-380",
     )
     parser.add_argument(
         "--midi-port",
@@ -42,6 +47,21 @@ def _parse_args() -> argparse.Namespace:
         help="Print raw MIDI messages from your controller (for mapping verification)",
     )
     parser.add_argument(
+        "--setup",
+        action="store_true",
+        help="Show Mixxx + audio setup status and exit",
+    )
+    parser.add_argument(
+        "--install-mapping",
+        action="store_true",
+        help="Install VCI-380 controller mapping into Mixxx and exit",
+    )
+    parser.add_argument(
+        "--launch-mixxx",
+        action="store_true",
+        help="Launch Mixxx after setup",
+    )
+    parser.add_argument(
         "--client-id",
         default=None,
         help="Spotify app client ID (or set SPOTIPY_CLIENT_ID env var)",
@@ -50,11 +70,6 @@ def _parse_args() -> argparse.Namespace:
         "--client-secret",
         default=None,
         help="Spotify app client secret (or set SPOTIPY_CLIENT_SECRET env var)",
-    )
-    parser.add_argument(
-        "--no-audio-engine",
-        action="store_true",
-        help="Disable the local audio engine (Spotify-API-only mode)",
     )
     parser.add_argument(
         "-v", "--verbose",
@@ -91,6 +106,23 @@ def main() -> None:
         run_monitor(port_name=args.midi_port)
         sys.exit(0)
 
+    # -- Setup status --
+    if args.setup:
+        print_setup_status()
+        from spotifycontroller.mixxx.audio_capture import print_audio_routing_status
+
+        print_audio_routing_status()
+        sys.exit(0)
+
+    # -- Install mapping --
+    if args.install_mapping:
+        if install_controller_mapping():
+            print("VCI-380 mapping installed into Mixxx.")
+            print("Restart Mixxx, then go to Preferences → Controllers → Vestax VCI-380")
+        else:
+            print("Failed to install mapping. Is Mixxx installed?")
+        sys.exit(0)
+
     # -- Spotify credentials --
     client_id = args.client_id or os.environ.get("SPOTIPY_CLIENT_ID")
     client_secret = args.client_secret or os.environ.get("SPOTIPY_CLIENT_SECRET")
@@ -107,21 +139,49 @@ def main() -> None:
     sp_client = create_spotify_client(client_id, client_secret)
     playback = SpotifyPlayback(sp_client)
 
-    # -- Audio engine (optional) --
-    audio_engine = None
-    if not args.no_audio_engine:
-        try:
-            from spotifycontroller.engine.audio import AUDIO_ENGINE_AVAILABLE, AudioEngine
+    # -- Mixxx status --
+    mixxx_exe = find_mixxx_executable()
+    if mixxx_exe:
+        print(f"Mixxx found: {mixxx_exe}")
+    else:
+        print("Mixxx not found. Install from https://mixxx.org/download/")
+        print("SpotifyController works without Mixxx but with limited DJ features.")
 
-            if AUDIO_ENGINE_AVAILABLE:
-                audio_engine = AudioEngine()
-                audio_engine.start()
-                print("Local audio engine: ACTIVE (load local files with 'loadfile')")
-            else:
-                print("Local audio engine: DISABLED (install sounddevice + soundfile to enable)")
-        except Exception:
-            _LOGGER.debug("Audio engine init failed", exc_info=True)
-            print("Local audio engine: DISABLED (optional)")
+    # -- Launch Mixxx if requested --
+    mixxx_proc = None
+    if args.launch_mixxx and mixxx_exe:
+        from spotifycontroller.mixxx.integration import launch_mixxx
+
+        mixxx_proc = launch_mixxx(mixxx_exe)
+        if mixxx_proc:
+            print(f"Mixxx launched (PID {mixxx_proc.pid})")
+
+    # -- Audio engine --
+    audio_engine = None
+    try:
+        from spotifycontroller.engine.audio import AUDIO_ENGINE_AVAILABLE, AudioEngine
+
+        if AUDIO_ENGINE_AVAILABLE:
+            audio_engine = AudioEngine()
+            audio_engine.start()
+            print("Local audio engine: ACTIVE")
+        else:
+            print("Local audio engine: DISABLED (pip install sounddevice soundfile)")
+    except Exception:
+        _LOGGER.debug("Audio engine init failed", exc_info=True)
+
+    # -- Audio capture --
+    audio_capture = None
+    try:
+        from spotifycontroller.mixxx.audio_capture import AudioCapture, find_loopback_device
+
+        if find_loopback_device() is not None:
+            audio_capture = AudioCapture()
+            print("Audio capture: AVAILABLE (use 'capture start' to begin)")
+        else:
+            print("Audio capture: no loopback device found")
+    except Exception:
+        _LOGGER.debug("Audio capture init failed", exc_info=True)
 
     # -- Controller setup --
     controller = VestaxVCI380()
@@ -138,11 +198,17 @@ def main() -> None:
         print(f"MIDI ports found: {', '.join(ports)}")
         listener.start()
     else:
-        print("WARNING: No MIDI ports found. Running without controller input.")
-        print("You can still use console commands to control Spotify.")
+        print("No MIDI ports found — console-only mode.")
 
     # -- Console UI --
-    run_console(mixer, playback, listener, audio_engine=audio_engine)
+    run_console(
+        mixer,
+        playback,
+        listener,
+        audio_engine=audio_engine,
+        audio_capture=audio_capture,
+        mixxx_proc=mixxx_proc,
+    )
 
 
 if __name__ == "__main__":
